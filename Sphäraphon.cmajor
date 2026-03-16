@@ -1,27 +1,35 @@
 // Sphäraphon: Music of the Spheres for Tritone – Global Alignment Edition
+// Heterodyne instrument inspired by Jörg Mager 1924
+// Cmajor for Amorph (or any Cmajor host)
+
 graph SphäraphonGlobalAlignment
 {
     input midiIn;
     output audioOut : stereo;
 
-    param float crank = 0.0;          // CC1 – Brass Crank (0 = 50kHz, 1 = 30kHz)
-    param float expression = 1.0;     // CC11 – Volume "Breath"
-    param float tubeDrive = 0.35;
-    param float driftDepth = 0.12;
-    param float filterRes = 18.0;     // High for tritone ring
+    // Parameters (exposed in Amorph GUI)
+    param float crank = 0.0;          // CC#1 Mod Wheel – Brass Crank (0.0 = 50kHz, 1.0 = 30kHz)
+    param float expression = 1.0;     // CC#11 Expression Pedal – "Breath of the Spheres"
+    param float tubeDrive = 0.35;     // Tube Heat intensity
+    param float driftDepth = 0.12;    // Aether Drift amount
+    param float filterRes = 18.0;     // Resonance for Hollow/Pure & Tritone boost
 
-    oscillator carrier { freq = 50000.0; waveform = sine; precision = double; }
+    // Core Oscillators (64-bit for supersonic stability)
+    oscillator carrier   { freq = 50000.0; waveform = sine; precision = double; }
     oscillator modulator { waveform = sine; precision = double; }
 
-    // Aether Drift – 0.2 Hz organic jitter
+    // Aether Drift – 0.2 Hz Perlin-style organic jitter
     noise driftNoise { type = perlin; rate = 0.2; seed = 42; }
     lowpass driftSmooth { cutoff = 0.8; }
 
+    // Heterodyne stage
     multiply heterodyneMix {};
     lowpass antiAliasLPF { cutoff = 22000.0; order = 8; }
 
+    // Tritone Cosmic Event
     bandpass tritoneBoost { q = 20.0; gain = 1.8; }
 
+    // Vintage chain
     saturation tubeHeat { drive = tubeDrive; type = softTriode; }
     resonantFilter hollowFilter { type = lowpass; cutoff = 8500.0; resonance = filterRes; }
     reverb cosmicSpace { size = 0.9; decay = 8.0; damping = 0.3; width = 0.7; }
@@ -31,31 +39,36 @@ graph SphäraphonGlobalAlignment
     process (midiIn) -> audioOut
     {
         let modWheel = clamp(midiIn.cc(1), 0.0, 1.0);
-        let expr = clamp(midiIn.cc(11), 0.0, 1.0);
+        let expr     = clamp(midiIn.cc(11), 0.0, 1.0);
 
+        // Crank controls modulator frequency
         let modFreq = 50000.0 - (modWheel * 20000.0);
+
+        // Apply living Aether Drift
         let drift = driftNoise.next() * driftDepth * 60.0;
         modulator.freq = modFreq + driftSmooth.process(drift);
         carrier.freq = 50000.0;
 
+        // Heterodyne difference tone
         let rf = carrier.next() * modulator.next();
         let audible = antiAliasLPF.process(rf);
 
-        // Tritone Alignment Detection
-        let audibleFreq = abs(50000.0 - modFreq);
-        let tritoneTarget = 440.0 * 1.41421356237; // reference root A=440
-        let inAlignment = abs(audibleFreq - tritoneTarget) < 18.0;
+        // Tritone Alignment Detection (≈1.4142 ratio)
+        let audibleFreq   = abs(50000.0 - modFreq);
+        let tritoneTarget = 440.0 * 1.41421356237;   // reference A=440
+        let inAlignment   = abs(audibleFreq - tritoneTarget) < 18.0;
 
         let signal = inAlignment ? tritoneBoost.process(audible) : audible;
 
+        // Vintage processing chain
         signal = tubeHeat.process(signal);
         signal = hollowFilter.process(signal);
         signal = cosmicSpace.process(signal);
 
-        let vol = expr * 0.85;
-        finalGain.gain = vol;  // add smoothing filter in full impl if needed
+        // Volume with gentle tube-like response
+        finalGain.gain = expr * 0.85;
 
-        audioOut.left = finalGain.process(signal * 0.75);
-        audioOut.right = finalGain.process(signal * 0.75); // simple stereo
+        audioOut.left  = finalGain.process(signal * 0.75);
+        audioOut.right = finalGain.process(signal * 0.75);
     }
 }
